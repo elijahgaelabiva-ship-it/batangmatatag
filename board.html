@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BLIP Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-top:#1c1712; --bg-bottom:#0f0c09;
+    --gold:#cda468; --gold-bright:#e9c68d; --gold-wash:rgba(205,164,104,.14);
+    --ivory:#f4ecdd; --ivory-dim:rgba(244,236,221,.55);
+    --border:rgba(214,178,120,.20);
+    --sq-light:#2a241c; --sq-dark:#18140f;
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;min-height:100%;display:flex;flex-direction:column;align-items:center;
+    background:linear-gradient(180deg,var(--bg-top),var(--bg-bottom));
+    font-family:'Manrope',-apple-system,sans-serif;color:var(--ivory);
+    padding:env(safe-area-inset-top,0) 16px calc(24px + env(safe-area-inset-bottom,0));
+  }
+  h1{font-family:'Chakra Petch',sans-serif;font-weight:600;letter-spacing:.04em;font-size:20px;margin:20px 0 4px}
+  #status{font-size:13px;color:var(--ivory-dim);margin-bottom:18px;text-align:center;min-height:18px}
+  #picker{display:flex;gap:12px;margin-top:40px}
+  .pick-btn{
+    font-family:'Chakra Petch',sans-serif;font-size:15px;font-weight:600;letter-spacing:.03em;
+    padding:16px 20px;border-radius:14px;border:1px solid var(--border);
+    background:var(--gold-wash);color:var(--gold-bright);
+  }
+  .pick-btn:active{background:rgba(205,164,104,.26)}
+  #board-wrap{width:min(92vw,420px);aspect-ratio:1;margin-bottom:18px}
+  #chess-board{display:grid;grid-template-columns:repeat(8,1fr);width:100%;height:100%;border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+  #ttt-board{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);width:100%;height:100%;gap:6px}
+  .sq{display:flex;align-items:center;justify-content:center;font-size:clamp(20px,7vw,34px);position:relative}
+  .sq.light{background:var(--sq-light)}
+  .sq.dark{background:var(--sq-dark)}
+  .sq.sel{box-shadow:inset 0 0 0 3px var(--gold-bright)}
+  .sq.hint::after{content:'';position:absolute;width:22%;height:22%;border-radius:50%;background:var(--gold);opacity:.65}
+  .ttt-cell{background:var(--gold-wash);border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;font-family:'Chakra Petch',sans-serif;font-size:clamp(28px,12vw,52px);font-weight:600}
+  .ttt-cell.x{color:var(--gold-bright)}
+  .ttt-cell.o{color:var(--ivory)}
+  #controls{display:flex;gap:10px;margin:4px 0 8px}
+  button.ctl{font-family:'Manrope',sans-serif;font-size:13px;padding:10px 16px;border-radius:10px;border:1px solid var(--border);background:rgba(244,236,221,.05);color:var(--ivory-dim)}
+  button.ctl:active{background:rgba(244,236,221,.1)}
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+  <h1>BLIP Board</h1>
+  <div id="status">Connecting&hellip;</div>
+
+  <div id="picker" class="hidden">
+    <button class="pick-btn" id="pick-chess">&#9823; Chess</button>
+    <button class="pick-btn" id="pick-ttt">&#10005;&#11093; Tic-Tac-Toe</button>
+  </div>
+
+  <div id="board-wrap" class="hidden">
+    <div id="chess-board" class="hidden"></div>
+    <div id="ttt-board" class="hidden"></div>
+  </div>
+  <div id="controls" class="hidden">
+    <button class="ctl" id="new-game">New game</button>
+    <button class="ctl" id="switch-game">Switch game</button>
+  </div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chess.js@0.12.1/chess.js"></script>
+<script>
+// ================================================================
+// PASTE YOUR FIREBASE CONFIG BELOW (from Firebase console > Project
+// settings > Your apps > the </> web app you registered).
+// ================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyDlfOTLURQMw33ztsxPQW3Q4lJDHM7bEHQ",
+  authDomain: "blip-games.firebaseapp.com",
+  databaseURL: "https://blip-games-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "blip-games",
+  storageBucket: "blip-games.firebasestorage.app",
+  messagingSenderId: "550222108982",
+  appId: "1:550222108982:web:2315644b1bf923d3693b97"
+};
+// ================================================================
+
+const ROOM = 'blip-room-1';
+
+firebase.initializeApp(firebaseConfig);
+const gameRef = firebase.database().ref('games/' + ROOM);
+
+const statusEl = document.getElementById('status');
+const pickerEl = document.getElementById('picker');
+const boardWrapEl = document.getElementById('board-wrap');
+const chessBoardEl = document.getElementById('chess-board');
+const tttBoardEl = document.getElementById('ttt-board');
+const controlsEl = document.getElementById('controls');
+
+let state = null;
+let chess = null;     // chess.js instance, rebuilt from state.fen on every update
+let selected = null;  // locally-selected square, e.g. 'e2' (never synced - purely local UI)
+
+const PIECES = { p:'\u265F',n:'\u265E',b:'\u265D',r:'\u265C',q:'\u265B',k:'\u265A',
+                 P:'\u2659',N:'\u2658',B:'\u2657',R:'\u2656',Q:'\u2655',K:'\u2654' };
+
+function newChessState() {
+  return { type: 'chess', fen: new Chess().fen(), turn: 'player', status: 'playing', note: '' };
+}
+function newTTTState() {
+  return { type: 'tictactoe', cells: ['','','','','','','','',''], turn: 'player', status: 'playing', note: '' };
+}
+
+// Chess engine: if the first download failed, try backups before giving up.
+const hasChess = () => typeof Chess === 'function';
+let engineTried = false;
+function ensureChess(cb) {
+  if (hasChess()) return cb(true);
+  if (engineTried) return cb(false);
+  engineTried = true;
+  const urls = ['https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.min.js',
+                'https://unpkg.com/chess.js@0.12.1/chess.js'];
+  let i = 0;
+  (function next() {
+    if (hasChess()) return cb(true);
+    if (i >= urls.length) return cb(false);
+    const s = document.createElement('script');
+    s.src = urls[i++]; s.onload = next; s.onerror = next;
+    document.head.appendChild(s);
+  })();
+}
+const ENGINE_FAIL = "Chess engine couldn't load on this phone. Check the internet, then refresh.";
+function startChess() {
+  ensureChess(ok => ok ? gameRef.set(newChessState()) : (statusEl.textContent = ENGINE_FAIL));
+}
+let waitTimer = null;
+document.getElementById('pick-chess').onclick = startChess;
+document.getElementById('pick-ttt').onclick   = () => gameRef.set(newTTTState());
+document.getElementById('new-game').onclick   = () => state.type === 'chess' ? startChess() : gameRef.set(newTTTState());
+document.getElementById('switch-game').onclick = () => gameRef.remove();
+
+gameRef.on('value', (snap) => {
+  state = snap.val();
+  selected = null;
+  render();
+});
+
+function render() {
+  clearTimeout(waitTimer);
+  if (!state) {
+    statusEl.textContent = 'Tap a game to start';
+    pickerEl.classList.remove('hidden');
+    boardWrapEl.classList.add('hidden');
+    controlsEl.classList.add('hidden');
+    return;
+  }
+  pickerEl.classList.add('hidden');
+  boardWrapEl.classList.remove('hidden');
+  controlsEl.classList.remove('hidden');
+  chessBoardEl.classList.toggle('hidden', state.type !== 'chess');
+  tttBoardEl.classList.toggle('hidden', state.type !== 'tictactoe');
+  statusEl.textContent = statusText();
+  if (state.type === 'chess') {
+    if (!hasChess()) {
+      statusEl.textContent = 'Loading chess engine\u2026';
+      ensureChess(ok => ok ? render() : (statusEl.textContent = ENGINE_FAIL));
+      return;
+    }
+    renderChess();
+  } else renderTTT();
+  // if BLIP never answers, say so instead of "thinking" forever
+  if (state.status === 'playing' && state.turn === 'blip' && !state.engineError) {
+    waitTimer = setTimeout(() => {
+      statusEl.textContent = "BLIP isn't answering. Is the BLIP app open on its phone?";
+    }, 9000);
+  }
+}
+
+function statusText() {
+  if (state.engineError) return "BLIP's chess engine didn't load. Refresh the BLIP app and try again.";
+  if (state.status === 'player_won') return 'You won! \uD83C\uDF89';
+  if (state.status === 'blip_won') return 'BLIP won this one';
+  if (state.status === 'draw') return "It's a draw";
+  if (state.turn !== 'player') return 'BLIP is thinking\u2026';
+  return 'Your move' + (state.note && state.note.indexOf('blip ') === 0 ? ' \u00B7 BLIP ' + state.note.slice(5) : '');
+}
+
+// ---------------- Chess ----------------
+function renderChess() {
+  chess = new Chess(state.fen);
+  chessBoardEl.innerHTML = '';
+  const board = chess.board(); // row 0 = rank 8 ... row 7 = rank 1
+  const legal = selected ? chess.moves({ square: selected, verbose: true }).map(m => m.to) : [];
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const file = 'abcdefgh'[c], rank = 8 - r, sqName = file + rank;
+      const piece = board[r][c];
+      const sq = document.createElement('div');
+      sq.className = 'sq ' + ((r + c) % 2 === 0 ? 'light' : 'dark');
+      if (piece) sq.textContent = PIECES[piece.color === 'w' ? piece.type.toUpperCase() : piece.type];
+      if (sqName === selected) sq.classList.add('sel');
+      if (legal.includes(sqName)) sq.classList.add('hint');
+      sq.onclick = () => onChessTap(sqName);
+      chessBoardEl.appendChild(sq);
+    }
+  }
+}
+function onChessTap(sqName) {
+  if (state.status !== 'playing' || state.turn !== 'player') return;
+  const piece = chess.get(sqName);
+  if (selected) {
+    const move = chess.move({ from: selected, to: sqName, promotion: 'q' });
+    selected = null;
+    if (move) { pushChessState(move); return; }
+    if (piece && piece.color === 'w') { selected = sqName; }
+    renderChess();
+    return;
+  }
+  if (piece && piece.color === 'w') { selected = sqName; renderChess(); }
+}
+function pushChessState(move) {
+  let status = 'playing';
+  if (chess.in_checkmate()) status = 'player_won';
+  else if (chess.in_draw() || chess.in_stalemate()) status = 'draw';
+  gameRef.update({ fen: chess.fen(), turn: status === 'playing' ? 'blip' : 'player', status, note: 'player moved ' + move.san });
+}
+
+// ---------------- Tic-Tac-Toe ----------------
+const WIN_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+function tttWinner(cells) {
+  for (const [a,b,c] of WIN_LINES) if (cells[a] && cells[a] === cells[b] && cells[a] === cells[c]) return cells[a];
+  return cells.every(x => x) ? 'draw' : null;
+}
+function renderTTT() {
+  tttBoardEl.innerHTML = '';
+  state.cells.forEach((v, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'ttt-cell' + (v === 'X' ? ' x' : v === 'O' ? ' o' : '');
+    cell.textContent = v || '';
+    cell.onclick = () => onTTTTap(i);
+    tttBoardEl.appendChild(cell);
+  });
+}
+function onTTTTap(i) {
+  if (state.status !== 'playing' || state.turn !== 'player' || state.cells[i]) return;
+  const cells = state.cells.slice();
+  cells[i] = 'X';
+  const w = tttWinner(cells);
+  const status = w === 'X' ? 'player_won' : w === 'draw' ? 'draw' : 'playing';
+  gameRef.update({ cells, turn: status === 'playing' ? 'blip' : 'player', status, note: 'player placed X in square ' + i });
+}
+</script>
+</body>
+</html>

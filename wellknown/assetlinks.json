@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.netlify.batangmatatag.twa",
+      "sha256_cert_fingerprints": [
+        "0F:2E:0B:71:02:DD:9A:44:D6:B1:FD:01:4C:1E:67:8A:75:BE:38:04:E9:54:3F:2F:0C:7B:F1:BD:85:71:E2:93"
+      ]
+    }
+  }
+]
